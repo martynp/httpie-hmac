@@ -19,12 +19,26 @@ from urllib.parse import urlparse
 
 
 class HmacGenerate:
-    def generate(access_key, secret_key, method, content_type, content_md5, http_date, path, r):
+    def generate(access_key,
+                 secret_key,
+                 method,
+                 content_type,
+                 content_md5,
+                 http_date,
+                 path,
+                 r):
         pass
 
 
 class Simple(HmacGenerate):
-    def generate(access_key, secret_key, method, content_type, content_md5, http_date, path, r):
+    def generate(access_key,
+                 secret_key,
+                 method,
+                 content_type,
+                 content_md5,
+                 http_date,
+                 path,
+                 r):
 
         string_to_sign = '\n'.join(
             [method, content_md5, content_type, http_date, path]).encode()
@@ -32,7 +46,7 @@ class Simple(HmacGenerate):
                           hashlib.sha256).digest()
         signature = base64.b64encode(digest).rstrip().decode('utf-8')
 
-        if access_key == None or access_key == '':
+        if access_key is None or access_key == '':
             r.headers['Authorization'] = f"HMAC {signature}"
         elif secret_key == '':
             raise ValueError('HMAC secret key cannot be empty.')
@@ -65,7 +79,8 @@ class HmacAuth:
                 loader.exec_module(mod)
                 if issubclass(mod.HmacAuthCustom, HmacGenerate) is False:
                     raise TypeError(
-                        "Custom generator must inherit httpie_hmac.HmacGenerate")
+                        "Custom generator must inherit "
+                        "httpie_hmac.HmacGenerate")
                 self.formatter = mod.HmacAuthCustom
             else:
                 self.formatter = generators[format]
@@ -108,7 +123,14 @@ class HmacAuth:
         path = url.path
 
         # Call the formatter to add the required headers and return r
-        return self.formatter.generate(self.access_key, self.secret_key_bytes, method, content_type, content_md5, http_date, path, r)
+        return self.formatter.generate(self.access_key,
+                                       self.secret_key_bytes,
+                                       method,
+                                       content_type,
+                                       content_md5,
+                                       http_date,
+                                       path,
+                                       r)
 
 
 class HmacPlugin(AuthPlugin):
