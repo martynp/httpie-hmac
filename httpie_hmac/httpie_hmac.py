@@ -5,55 +5,55 @@ Original Author: Nick Satterly (https://github.com/guardian/httpie-hmac-auth)
 Extended by: Martyn Pittuck-Schols
 
 """
-import datetime
 import base64
+import datetime
 import hashlib
 import hmac
-
-import types
 import importlib.machinery
+import requests
+import types
+
+from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from httpie.plugins import AuthPlugin
 
-from urllib.parse import urlparse
+
+@dataclass
+class RequestData:
+    access_key: str
+    secret_key: str
+    method: str
+    content_type: str
+    content_md5: str
+    http_date: str
+    path: str
+    raw_settings: dict
+    inner: requests.models.PreparedRequest
 
 
 class HmacGenerate:
-    def generate(access_key,
-                 secret_key,
-                 method,
-                 content_type,
-                 content_md5,
-                 http_date,
-                 path,
-                 r):
+    def generate(request: RequestData):
         pass
 
 
 class Simple(HmacGenerate):
-    def generate(access_key,
-                 secret_key,
-                 method,
-                 content_type,
-                 content_md5,
-                 http_date,
-                 path,
-                 r):
+    def generate(request):
 
         string_to_sign = '\n'.join(
-            [method, content_md5, content_type, http_date, path]).encode()
-        digest = hmac.new(secret_key, string_to_sign,
+            [request.method, request.content_md5, request.content_type,
+             request.http_date, request.path]).encode()
+        digest = hmac.new(request.secret_key, string_to_sign,
                           hashlib.sha256).digest()
         signature = base64.b64encode(digest).rstrip().decode('utf-8')
 
-        if access_key is None or access_key == '':
-            r.headers['Authorization'] = f"HMAC {signature}"
-        elif secret_key == '':
-            raise ValueError('HMAC secret key cannot be empty.')
+        if request.access_key is None or request.access_key == '':
+            request.inner.headers['Authorization'] = f"HMAC {signature}"
         else:
-            r.headers['Authorization'] = f"HMAC {access_key}:{signature}"
+            request.inner.headers['Authorization'] = \
+                f"HMAC {request.access_key}:{signature}"
 
-        return r
+        return request.inner
 
 
 generators = {
@@ -62,12 +62,13 @@ generators = {
 
 
 class HmacAuth:
-    def __init__(self, access_key, secret_key, format):
+    def __init__(self, access_key, secret_key, format, raw_settings):
         self.access_key = access_key
         self.secret_key = secret_key
         self.secret_key_bytes = bytes(secret_key, 'UTF-8')
         self.use_custom = False
         self.formatter = None
+        self.raw_settings = raw_settings
 
         if format is not None:
 
@@ -123,14 +124,11 @@ class HmacAuth:
         path = url.path
 
         # Call the formatter to add the required headers and return r
-        return self.formatter.generate(self.access_key,
-                                       self.secret_key_bytes,
-                                       method,
-                                       content_type,
-                                       content_md5,
-                                       http_date,
-                                       path,
-                                       r)
+        return self.formatter.generate(
+            RequestData(self.access_key, self.secret_key_bytes,
+                        method, content_type, content_md5, http_date, path,
+                        self.raw_settings, r)
+        )
 
 
 class HmacPlugin(AuthPlugin):
@@ -164,4 +162,7 @@ class HmacPlugin(AuthPlugin):
             elif key == "format":
                 format = value
 
-        return HmacAuth(access, secret, format)
+        if secret == '':
+            raise ValueError('HMAC secret key cannot be empty.')
+
+        return HmacAuth(access, secret, format, split)
