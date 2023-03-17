@@ -10,11 +10,18 @@ The httpie auth should be set to ``hmac`` and the ``--auth`` field contains key-
 * ``access`` - (Optional) String access token / id used to identify the user depending on the schema
 * ``format`` - (Optional) Sets a pre-defined format or a python file to process the headers
 
+Key-value pairs can also be set using environment variables starting with `HTTPIE_HMAC_`.
+
 For example:
 
-```
+``` bash
 http --auth-type=hmac --auth="secret:some_secret" GET http://localhost:8000
 http --auth-type=hmac --auth="secret:7Ez...wVA,access:AK...6R,format:aws4" GET https://my_bucket.s3.eu-west-2.amazonaws.com/file.txt
+
+export HTTPIE_HMAC_SECRET=7Ez...wVA
+export HTTPIE_HMAC_ACCESS=AK...6R
+export HTTPIE_HMAC_FORMAT=aws4
+httpie --auth-type=hmac --auth="" GET https://my_bucket.s3.eu-west-2.amazonaws.com/file.txt
 ```
 
 ## Supported Formats

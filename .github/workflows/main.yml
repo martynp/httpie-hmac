@@ -15,6 +15,21 @@ jobs:
           python-version: "3.11"
       - name: flake8 Lint
         uses: py-actions/flake8@v2
+  aws-test:
+    runs-on: ubuntu-latest
+    name: Test against AWS bucket
+    steps:
+      - name: Check out source repository
+        uses: actions/checkout@v3
+      - name: Download a file from S3 using httpie-hmac
+        env:
+          HTTPIE_HMAC_SECRET: '${{ secrets.AWS_S3_TEST_SECRET }}'
+          HTTPIE_HMAC_ACCESS: '${{ secrets.AWS_S3_TEST_ACCESS }}'
+        run: |
+          python3 -m venv venv
+          source venv/bin/activate
+          python3 -m pip install .
+          python3 -m httpie --check-status --auth-type=hmac --auth="format:aws4" GET https://api-testing-httpie-hmac.s3.eu-west-2.amazonaws.com/short.txt
   push:
     runs-on: ubuntu-latest
     name: Publish

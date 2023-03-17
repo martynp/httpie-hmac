@@ -10,6 +10,7 @@ import datetime
 import hashlib
 import hmac
 import importlib.machinery
+import os
 import requests
 import types
 
@@ -147,7 +148,7 @@ class HmacAuth:
         # it ourselves and add it to the headers
         content_md5 = r.headers.get('content-md5')
         if not content_md5:
-            if content_type:
+            if content_type and r.body:
                 m = hashlib.md5()
                 m.update(r.body)
                 content_md5 = base64.b64encode(m.digest()).rstrip()
@@ -186,30 +187,36 @@ class HmacPlugin(AuthPlugin):
         '''
         This method is called by the auth plugin manager, by setting auth_parse
         to False the --auth argument is not parsed and is available in raw_auth
-
-
         '''
-        split = self.raw_auth.split(",")
-
-        access = None
-        secret = None
-        format = None
 
         settings = {}
 
-        for entry in split:
-            key, value = entry.strip().split(":")
-            key = key.strip()
-            value = value.strip()
-            if key == "access":
-                access = value
-            elif key == "secret":
-                secret = value
-            elif key == "format":
-                format = value
-            settings[key] = value
+        # If env settings exist set them as default, auth settings will
+        # override
+        for setting in os.environ.items():
+            if setting[0].startswith("HTTPIE_HMAC_"):
+                key = setting[0].split("HTTPIE_HMAC_")[1].lower()
+                settings[key] = setting[1]
 
-        if secret == '':
+        access = settings.get("access", None)
+        secret = settings.get("secret", None)
+        format = settings.get("format", None)
+
+        if len(self.raw_auth) > 0:
+            split = self.raw_auth.split(",")
+            for entry in split:
+                key, value = entry.strip().split(":")
+                key = key.strip()
+                value = value.strip()
+                if key == "access":
+                    access = value
+                elif key == "secret":
+                    secret = value
+                elif key == "format":
+                    format = value
+                settings[key] = value
+
+        if secret is None or secret == '':
             raise ValueError('HMAC secret key cannot be empty.')
 
         return HmacAuth(access, secret, format, settings)

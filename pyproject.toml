@@ -1,3 +1,31 @@
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "httpie-hmac"
+version = "1.0.0"
+authors = [
+    {name = "Martyn Pittuck-Schols", email = "12006448+martynp@users.noreply.github.com"},
+]
+description = "HMAC Auth Plugin for Httpie"
+readme = "README.md"
+requires-python = ">=3.7"
+keywords = ["httpie", "auth", "hmac", "aws4"]
+license = {text = "MIT"}
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "aws_requests_auth",
+    "httpie",
+    "requests",
+]
+
+[project.urls]
+homepage = "https://github.com/martynp/httpie-hmac/"
+repository = "https://github.com/martynp/httpie-hmac.git"
+
+[project.entry-points."httpie.plugins.auth.v1"]
+httpie-hmac = "httpie_hmac:HmacPlugin"
