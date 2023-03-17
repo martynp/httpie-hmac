@@ -13,6 +13,7 @@ import importlib.machinery
 import requests
 import types
 
+from aws_requests_auth.aws_auth import AWSRequestsAuth
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -43,7 +44,7 @@ class Simple(HmacGenerate):
         string_to_sign = '\n'.join(
             [request.method, request.content_md5, request.content_type,
              request.http_date, request.path]).encode()
-        digest = hmac.new(request.secret_key, string_to_sign,
+        digest = hmac.new(bytes(request.secret_key, 'UTF-8'), string_to_sign,
                           hashlib.sha256).digest()
         signature = base64.b64encode(digest).rstrip().decode('utf-8')
 
@@ -56,7 +57,51 @@ class Simple(HmacGenerate):
         return request.inner
 
 
+class AWS4(HmacGenerate):
+    def generate(request):
+
+        url = urlparse(request.inner.url).netloc
+
+        host = url
+        region = None
+        service = None
+
+        # Only try and get the rest of the parts if we know the domain
+        # is correct
+        url_parts = url.split(".")
+        if ".".join(url_parts[-2:]) == "amazonaws.com" and len(url_parts) >= 4:
+            region = url_parts[-3]
+            service = url_parts[-4]
+
+        # Allow overrides
+        if "host" in request.raw_settings:
+            host = request.raw_settings["host"]
+        if region is None:
+            if "region" not in request.raw_settings:
+                raise ValueError("AWS region could not be inferred so must be "
+                                 "set manually (e.g. eu-west-2)")
+            else:
+                region = request.raw_settings["region"]
+        if service is None:
+            if "service" not in request.raw_settings:
+                raise ValueError("AWS service could not be inferred so must "
+                                 "be set manually (e.g. s3)")
+            else:
+                service = request.raw_settings["service"]
+
+        auth = AWSRequestsAuth(
+            aws_access_key=request.access_key,
+            aws_secret_access_key=request.secret_key,
+            aws_host=host,
+            aws_region=region,
+            aws_service=service,
+        )
+
+        return auth.__call__(request.inner)
+
+
 generators = {
+    'aws4': AWS4,
     'simple': Simple,
 }
 
@@ -65,7 +110,6 @@ class HmacAuth:
     def __init__(self, access_key, secret_key, format, raw_settings):
         self.access_key = access_key
         self.secret_key = secret_key
-        self.secret_key_bytes = bytes(secret_key, 'UTF-8')
         self.use_custom = False
         self.formatter = None
         self.raw_settings = raw_settings
@@ -125,7 +169,7 @@ class HmacAuth:
 
         # Call the formatter to add the required headers and return r
         return self.formatter.generate(
-            RequestData(self.access_key, self.secret_key_bytes,
+            RequestData(self.access_key, self.secret_key,
                         method, content_type, content_md5, http_date, path,
                         self.raw_settings, r)
         )
@@ -151,6 +195,8 @@ class HmacPlugin(AuthPlugin):
         secret = None
         format = None
 
+        settings = {}
+
         for entry in split:
             key, value = entry.strip().split(":")
             key = key.strip()
@@ -161,8 +207,9 @@ class HmacPlugin(AuthPlugin):
                 secret = value
             elif key == "format":
                 format = value
+            settings[key] = value
 
         if secret == '':
             raise ValueError('HMAC secret key cannot be empty.')
 
-        return HmacAuth(access, secret, format, split)
+        return HmacAuth(access, secret, format, settings)

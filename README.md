@@ -14,9 +14,18 @@ For example:
 
 ```
 http --auth-type=hmac --auth="secret:some_secret" GET http://localhost:8000
+http --auth-type=hmac --auth="secret:7Ez...wVA,access:AK...6R,format:aws4" GET https://my_bucket.s3.eu-west-2.amazonaws.com/file.txt
 ```
 
 ## Supported Formats
+
+### AWS4 (aws4)
+
+AWS4 uses the `AWSRequestsAuth` library to generate the required AWS auth header. It will attempt to get the required information from the provided URL, however the host, region and service fields can be set manually:
+
+```
+http --auth-type=hmac --auth="secret:7Ez...wVA,access:AK...6R,host:my_bucket.s3.eu-west-2.amazonaws.com,service:s3,region:eu-west-2:format:aws4" GET https://my_bucket.s3.eu-west-2.amazonaws.com/file.txt
+```
 
 ### Simple (simple)
 
@@ -50,22 +59,24 @@ from httpie_hmac import HmacGenerate
 
 class HmacAuthCustom(HmacGenerate):
 
-    def generate(access_key, secret_key, method, content_type, content_md5, http_date, path, r):
-        
+    def generate(request):
+
         string_to_sign = '\n'.join(
-            [method, content_md5, content_type, http_date, path]).encode()
-        digest = hmac.new(secret_key, string_to_sign,
+            [request.method, request.content_md5, request.content_type,
+             request.http_date, request.path]).encode()
+        digest = hmac.new(bytes(request.secret_key, 'UTF-8'), string_to_sign,
                           hashlib.sha256).digest()
         signature = base64.b64encode(digest).rstrip().decode('utf-8')
 
-        if access_key == None or access_key == '':
-            r.headers['Authorization'] = f"HMAC {signature}"
+        if request.access_key is None or request.access_key == '':
+            request.inner.headers['Authorization'] = f"HMAC {signature}"
         else:
-            r.headers['Authorization'] = f"HMAC {access_key}:{signature}"
+            request.inner.headers['Authorization'] = \
+                f"HMAC {request.access_key}:{signature}"
 
-        return r
+        return request.inner
 ```
 
-Note that the ``r.headers`` dict will contain `content_type`, `content_md5` and `date` fields if they were not previously set. If they are not required they need to be removed from the list.
+Note that the ``request.inner.headers`` dictionary will contain `content_type`, `content_md5` and `date` fields if they were not previously set. If they are not required they need to be removed from the list.
 
 Additional data could be passed to the custom formatter using environment variables if needed.
