@@ -24,7 +24,7 @@ jobs:
       - name: Download a file from S3 using httpie-hmac
         env:
           HTTPIE_HMAC_SECRET: '${{ secrets.AWS_S3_TEST_SECRET }}'
-          HTTPIE_HMAC_ACCESS: '${{ secrets.AWS_S3_TEST_ACCESS }}'
+          HTTPIE_HMAC_ACCESS_ID: '${{ secrets.AWS_S3_TEST_ACCESS }}'
         run: |
           python3 -m venv venv
           source venv/bin/activate
