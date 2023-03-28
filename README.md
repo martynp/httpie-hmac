@@ -7,7 +7,7 @@ This plugin extends the functionality to allow different HMAC patterns to be def
 The httpie auth should be set to ``hmac`` and the ``--auth`` field contains key-value pairs to configure the plugin, the keys are:
 
 * ``secret`` - base64 encoded secret to be used in the HMAC
-* ``access`` - (Optional) String access token / id used to identify the user depending on the schema
+* ``access_id`` - (Optional) String access token / id used to identify the user depending on the schema
 * ``format`` - (Optional) Sets a pre-defined format or a python file to process the headers
 
 Key-value pairs can also be set using environment variables starting with `HTTPIE_HMAC_`.
@@ -16,10 +16,10 @@ For example:
 
 ``` bash
 http --auth-type=hmac --auth="secret:some_secret" GET http://localhost:8000
-http --auth-type=hmac --auth="secret:7Ez...wVA,access:AK...6R,format:aws4" GET https://my_bucket.s3.eu-west-2.amazonaws.com/file.txt
+http --auth-type=hmac --auth="secret:7Ez...wVA,access_id:AK...6R,format:aws4" GET https://my_bucket.s3.eu-west-2.amazonaws.com/file.txt
 
 export HTTPIE_HMAC_SECRET=7Ez...wVA
-export HTTPIE_HMAC_ACCESS=AK...6R
+export HTTPIE_HMAC_ACCESS_ID=AK...6R
 export HTTPIE_HMAC_FORMAT=aws4
 httpie --auth-type=hmac --auth="" GET https://my_bucket.s3.eu-west-2.amazonaws.com/file.txt
 ```
@@ -31,7 +31,7 @@ httpie --auth-type=hmac --auth="" GET https://my_bucket.s3.eu-west-2.amazonaws.c
 AWS4 uses the `AWSRequestsAuth` library to generate the required AWS auth header. It will attempt to get the required information from the provided URL, however the host, region and service fields can be set manually:
 
 ```
-http --auth-type=hmac --auth="secret:7Ez...wVA,access:AK...6R,host:my_bucket.s3.eu-west-2.amazonaws.com,service:s3,region:eu-west-2:format:aws4" GET https://my_bucket.s3.eu-west-2.amazonaws.com/file.txt
+http --auth-type=hmac --auth="secret:7Ez...wVA,access_id:AK...6R,host:my_bucket.s3.eu-west-2.amazonaws.com,service:s3,region:eu-west-2:format:aws4" GET https://my_bucket.s3.eu-west-2.amazonaws.com/file.txt
 ```
 
 ### Simple (simple)
@@ -50,7 +50,7 @@ This string is signed using the sha256 HMAC. The resulting signature is placed i
 
 ```
 Authorization: HMAC [signature]
-Authorization: HMAC [access]:[signature]
+Authorization: HMAC [access_id]:[signature]
 ```
 
 ## Custom Format
@@ -75,11 +75,11 @@ class HmacAuthCustom(HmacGenerate):
                           hashlib.sha256).digest()
         signature = base64.b64encode(digest).rstrip().decode('utf-8')
 
-        if request.access_key is None or request.access_key == '':
+        if request.access_id is None or request.access_id == '':
             request.inner.headers['Authorization'] = f"HMAC {signature}"
         else:
             request.inner.headers['Authorization'] = \
-                f"HMAC {request.access_key}:{signature}"
+                f"HMAC {request.access_id}:{signature}"
 
         return request.inner
 ```

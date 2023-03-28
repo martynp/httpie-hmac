@@ -23,7 +23,7 @@ from httpie.plugins import AuthPlugin
 
 @dataclass
 class RequestData:
-    access_key: str
+    access_id: str
     secret_key: str
     method: str
     content_type: str
@@ -49,11 +49,11 @@ class Simple(HmacGenerate):
                           hashlib.sha256).digest()
         signature = base64.b64encode(digest).rstrip().decode('utf-8')
 
-        if request.access_key is None or request.access_key == '':
+        if request.access_id is None or request.access_id == '':
             request.inner.headers['Authorization'] = f"HMAC {signature}"
         else:
             request.inner.headers['Authorization'] = \
-                f"HMAC {request.access_key}:{signature}"
+                f"HMAC {request.access_id}:{signature}"
 
         return request.inner
 
@@ -91,7 +91,7 @@ class AWS4(HmacGenerate):
                 service = request.raw_settings["service"]
 
         auth = AWSRequestsAuth(
-            aws_access_key=request.access_key,
+            aws_access_key=request.access_id,
             aws_secret_access_key=request.secret_key,
             aws_host=host,
             aws_region=region,
@@ -108,8 +108,8 @@ generators = {
 
 
 class HmacAuth:
-    def __init__(self, access_key, secret_key, format, raw_settings):
-        self.access_key = access_key
+    def __init__(self, access_id, secret_key, format, raw_settings):
+        self.access_id = access_id
         self.secret_key = secret_key
         self.use_custom = False
         self.formatter = None
@@ -170,7 +170,7 @@ class HmacAuth:
 
         # Call the formatter to add the required headers and return r
         return self.formatter.generate(
-            RequestData(self.access_key, self.secret_key,
+            RequestData(self.access_id, self.secret_key,
                         method, content_type, content_md5, http_date, path,
                         self.raw_settings, r)
         )
@@ -198,7 +198,7 @@ class HmacPlugin(AuthPlugin):
                 key = setting[0].split("HTTPIE_HMAC_")[1].lower()
                 settings[key] = setting[1]
 
-        access = settings.get("access", None)
+        access_id = settings.get("access_id", None)
         secret = settings.get("secret", None)
         format = settings.get("format", None)
 
@@ -208,8 +208,8 @@ class HmacPlugin(AuthPlugin):
                 key, value = entry.strip().split(":")
                 key = key.strip()
                 value = value.strip()
-                if key == "access":
-                    access = value
+                if key == "access_id":
+                    access_id = value
                 elif key == "secret":
                     secret = value
                 elif key == "format":
@@ -219,4 +219,4 @@ class HmacPlugin(AuthPlugin):
         if secret is None or secret == '':
             raise ValueError('HMAC secret key cannot be empty.')
 
-        return HmacAuth(access, secret, format, settings)
+        return HmacAuth(access_id, secret, format, settings)
