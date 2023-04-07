@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "httpie-hmac"
 version = "1.1.0"
 authors = [
-    {name = "Martyn Pittuck-Schols", email = "12006448+martynp@users.noreply.github.com"},
+    {name = "Martyn Pittuck-Schols", email = "martyn@rustfoo.com"},
 ]
 description = "HMAC Auth Plugin for Httpie"
 readme = "README.md"
