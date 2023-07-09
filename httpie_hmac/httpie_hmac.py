@@ -10,6 +10,7 @@ import datetime
 import hashlib
 import hmac
 import importlib.machinery
+import io
 import os
 import requests
 import types
@@ -152,8 +153,16 @@ class HmacAuth:
         if not content_md5:
             if content_type and r.body:
                 m = hashlib.md5()
+                body = r.body
+                # If we have a buffer, convert it in to a string
+                if type(r.body) == io.BufferedReader:
+                    body = body.read()
+                    r.body = body
                 m.update(r.body)
-                content_md5 = base64.b64encode(m.digest()).rstrip().decode('utf-8')
+                content_md5 = base64 \
+                    .b64encode(m.digest()) \
+                    .rstrip() \
+                    .decode('utf-8')
                 r.headers['Content-MD5'] = content_md5
             else:
                 content_md5 = ''
