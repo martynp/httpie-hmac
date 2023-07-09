@@ -143,6 +143,8 @@ class HmacAuth:
         content_type = r.headers.get('content-type')
         if not content_type:
             content_type = ''
+        else:
+            content_type = content_type.decode('utf-8')
 
         # If content-md5 is already given, use it, otherwise calculate
         # it ourselves and add it to the headers
@@ -151,10 +153,12 @@ class HmacAuth:
             if content_type and r.body:
                 m = hashlib.md5()
                 m.update(r.body)
-                content_md5 = base64.b64encode(m.digest()).rstrip()
+                content_md5 = base64.b64encode(m.digest()).rstrip().decode('utf-8')
                 r.headers['Content-MD5'] = content_md5
             else:
                 content_md5 = ''
+        else:
+            content_md5 = content_md5.decode('utf-8')
 
         # If date is given already, use it - otherwise generate it
         # ourselves and add it to the headers
@@ -163,6 +167,8 @@ class HmacAuth:
             now = datetime.datetime.utcnow()
             http_date = now.strftime('%a, %d %b %Y %H:%M:%S GMT')
             r.headers['Date'] = http_date
+        else:
+            http_date = http_date.decode('utf-8')
 
         # Get the path from the UL
         url = urlparse(r.url)
