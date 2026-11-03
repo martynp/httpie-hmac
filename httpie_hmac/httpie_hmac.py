@@ -10,7 +10,6 @@ import datetime
 import hashlib
 import hmac
 import importlib.machinery
-import io
 import os
 import requests
 import types
@@ -20,6 +19,15 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from httpie.plugins import AuthPlugin
+
+from ._s3_auth import _S3RequestsAuth, _StreamingAWSRequestsAuth
+from ._body import (
+    ChunkedBody,
+    DEFAULT_MAX_BODY_SIZE,
+    _BodyStream,
+    body_size_limit,
+    prepare_body,
+)
 
 
 @dataclass
@@ -60,43 +68,78 @@ class Simple(HmacGenerate):
 
 
 class AWS4(HmacGenerate):
+    def _is_region(region):
+        """Recognize region shapes such as eu-west-2 and us-gov-west-1.
+
+        Require a two-letter prefix, alphabetic middle parts, and a numeric
+        suffix. This heuristic does not check whether the region exists.
+        """
+        parts = region.split('-')
+        return (len(parts) >= 3 and len(parts[0]) == 2
+                and parts[0].isalpha()
+                and all(part.isalpha() for part in parts[1:-1])
+                and parts[-1].isdigit())
+
+    def _infer_endpoint(hostname):
+        """Return (region, service), or (None, None) for unknown layouts.
+
+        Recognize service.region.amazonaws.com, regional S3 bucket endpoints,
+        and api-id.execute-api.region.amazonaws.com. Also handle OpenSearch
+        (search-example.eu-west-2.es.amazonaws.com -> ('eu-west-2', 'es'))
+        and S3 dualstack (bucket.s3.dualstack.eu-west-2.amazonaws.com
+        -> ('eu-west-2', 's3'), with or without a bucket prefix).
+        """
+        parts = (hostname or '').split('.')
+        if parts[-2:] != ['amazonaws', 'com']:
+            return None, None
+
+        labels = parts[:-2]
+        # OpenSearch domain endpoints put the region before the service.
+        if (len(labels) == 3 and labels[-1] == 'es'
+                and AWS4._is_region(labels[-2])):
+            return labels[-2], 'es'
+
+        if len(labels) < 2 or not AWS4._is_region(labels[-1]):
+            return None, None
+
+        region = labels[-1]
+        if len(labels) >= 3 and labels[-3:-1] == ['s3', 'dualstack']:
+            return region, 's3'
+        service = labels[-2]
+        if (service != 'dualstack' and
+                (len(labels) == 2 or service == 's3' or
+                 (len(labels) == 3 and service == 'execute-api'))):
+            return region, service
+        return None, None
+
     def generate(request):
 
-        url = urlparse(request.inner.url).netloc
-
-        host = url
-        region = None
-        service = None
-
-        # Only try and get the rest of the parts if we know the domain
-        # is correct
-        url_parts = url.split(".")
-        if ".".join(url_parts[-2:]) == "amazonaws.com" and len(url_parts) >= 4:
-            region = url_parts[-3]
-            service = url_parts[-4]
+        url = urlparse(request.inner.url)
+        host = url.netloc
+        region, service = AWS4._infer_endpoint(url.hostname)
 
         # Allow overrides
         if "host" in request.raw_settings:
             host = request.raw_settings["host"]
+        region = request.raw_settings.get('region', region)
+        service = request.raw_settings.get('service', service)
         if region is None:
-            if "region" not in request.raw_settings:
-                raise ValueError("AWS region could not be inferred so must be "
-                                 "set manually (e.g. eu-west-2)")
-            else:
-                region = request.raw_settings["region"]
+            raise ValueError("AWS region could not be inferred so must be "
+                             "set manually (e.g. eu-west-2)")
         if service is None:
-            if "service" not in request.raw_settings:
-                raise ValueError("AWS service could not be inferred so must "
-                                 "be set manually (e.g. s3)")
-            else:
-                service = request.raw_settings["service"]
+            raise ValueError("AWS service could not be inferred so must "
+                             "be set manually (e.g. s3)")
 
-        auth = AWSRequestsAuth(
+        auth_class = _S3RequestsAuth if service == 's3' else AWSRequestsAuth
+        if service != 's3' and isinstance(request.inner.body, _BodyStream):
+            auth_class = _StreamingAWSRequestsAuth
+        auth = auth_class(
             aws_access_key=request.access_id,
             aws_secret_access_key=request.secret_key,
             aws_host=host,
             aws_region=region,
             aws_service=service,
+            aws_token=request.raw_settings.get('session_token'),
         )
 
         return auth.__call__(request.inner)
@@ -115,6 +158,8 @@ class HmacAuth:
         self.use_custom = False
         self.formatter = None
         self.raw_settings = raw_settings
+        self.max_body_size = body_size_limit(
+            raw_settings.get('max_body_size', DEFAULT_MAX_BODY_SIZE))
 
         if format is not None:
 
@@ -136,6 +181,18 @@ class HmacAuth:
             self.formatter = Simple
 
     def __call__(self, r):
+        body, size, md5, sha256 = prepare_body(r.body, self.max_body_size)
+        r.body = body
+        r._hmac_payload_sha256 = sha256
+        r._body_position = 0 if isinstance(body, _BodyStream) else None
+        try:
+            return self._sign(r, size, md5)
+        except BaseException:
+            if isinstance(body, _BodyStream):
+                body.close()
+            raise
+
+    def _sign(self, r, body_size, body_md5):
 
         # Method (GET, POST etc)
         method = r.method
@@ -144,29 +201,19 @@ class HmacAuth:
         content_type = r.headers.get('content-type')
         if not content_type:
             content_type = ''
-        else:
+        elif isinstance(content_type, bytes):
             content_type = content_type.decode('utf-8')
 
         # If content-md5 is already given, use it, otherwise calculate
         # it ourselves and add it to the headers
         content_md5 = r.headers.get('content-md5')
         if not content_md5:
-            if content_type and r.body:
-                m = hashlib.md5()
-                body = r.body
-                # If we have a buffer, convert it in to a string
-                if type(r.body) == io.BufferedReader:
-                    body = body.read()
-                    r.body = body
-                m.update(r.body)
-                content_md5 = base64 \
-                    .b64encode(m.digest()) \
-                    .rstrip() \
-                    .decode('utf-8')
+            if content_type and body_size:
+                content_md5 = body_md5
                 r.headers['Content-MD5'] = content_md5
             else:
                 content_md5 = ''
-        else:
+        elif isinstance(content_md5, bytes):
             content_md5 = content_md5.decode('utf-8')
 
         # If date is given already, use it - otherwise generate it
@@ -176,7 +223,7 @@ class HmacAuth:
             now = datetime.datetime.utcnow()
             http_date = now.strftime('%a, %d %b %Y %H:%M:%S GMT')
             r.headers['Date'] = http_date
-        else:
+        elif isinstance(http_date, bytes):
             http_date = http_date.decode('utf-8')
 
         # Get the path from the UL
@@ -184,11 +231,22 @@ class HmacAuth:
         path = url.path
 
         # Call the formatter to add the required headers and return r
-        return self.formatter.generate(
+        signed = self.formatter.generate(
             RequestData(self.access_id, self.secret_key,
                         method, content_type, content_md5, http_date, path,
                         self.raw_settings, r)
         )
+        if isinstance(r.body, _BodyStream):
+            signed.register_hook('response', r.body.close_after_response)
+        transfer_encoding = signed.headers.get('Transfer-Encoding', '')
+        if isinstance(transfer_encoding, bytes):
+            transfer_encoding = transfer_encoding.decode('ascii')
+        if any(token.strip() == 'chunked'
+               for token in transfer_encoding.lower().split(',')):
+            signed.headers.pop('Content-Length', None)
+            signed.body = ChunkedBody(signed.body)
+            signed._body_position = None
+        return signed
 
 
 class HmacPlugin(AuthPlugin):
@@ -220,7 +278,7 @@ class HmacPlugin(AuthPlugin):
         if len(self.raw_auth) > 0:
             split = self.raw_auth.split(",")
             for entry in split:
-                key, value = entry.strip().split(":")
+                key, value = entry.strip().split(":", 1)
                 key = key.strip()
                 value = value.strip()
                 if key == "access_id":
